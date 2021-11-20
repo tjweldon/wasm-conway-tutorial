@@ -1,8 +1,12 @@
 mod utils;
 
+extern crate rand;
+
 use wasm_bindgen::prelude::*;
 use std::fmt;
 use std::fmt::Formatter;
+use rand::thread_rng;
+use rand::Rng;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -63,10 +67,9 @@ impl Universe {
             for col in 0..self.width {
                 let cell = self.get_cell(row, col);
                 let live_neighbors = self.live_neighbor_count(row, col);
-
-                let next_cell = match (cell, live_neighbors) {
-                    (Cell::Alive, x) if x < 2 => Cell::Dead,
-                    (Cell::Alive, 2) | (Cell::Alive, 3) => Cell::Alive,
+                let next_cell = match (cell, live_neighbors, death_roll, reproduction_roll) {
+                    (Cell::Alive, x, y) if x < 2 => Cell::Dead,
+                    (Cell::Alive, 2) | (Cell::Alive, 3, x, y) => Cell::Alive,
                     (Cell::Alive, x) if x > 3 => Cell::Dead,
                     (Cell::Dead, 3) => Cell::Alive,
                     (otherwise, _) => otherwise
@@ -79,12 +82,12 @@ impl Universe {
         self.cells = next;
     }
 
-    pub fn new() -> Universe {
-        let width = 64;
-        let height = 64;
+    pub fn new_sized(width: u32, height: u32) -> Universe {
+        let mut rng = thread_rng();
         let cells = (0..width * height)
-            .map(|i| {
-                if i % 2 == 0 || i % 9 == 0 {
+            .map(|_i| {
+                let roll: f64 = rng.gen_range(0.0, 100.0);
+                if roll < 60.0 {
                     Cell::Alive
                 } else {
                     Cell::Dead
@@ -95,12 +98,30 @@ impl Universe {
         Universe {
             width,
             height,
-            cells
+            cells,
         }
     }
 
-    pub fn render (&self) -> String {
+    pub fn new() -> Universe {
+        let width = 64;
+        let height = 64;
+        Universe::new_sized(width, height)
+    }
+
+    pub fn render(&self) -> String {
         self.to_string()
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    pub fn cells(&self) -> *const Cell {
+        self.cells.as_ptr()
     }
 }
 
