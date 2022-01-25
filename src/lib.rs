@@ -7,6 +7,7 @@ use std::fmt;
 use std::fmt::Formatter;
 use rand::thread_rng;
 use rand::Rng;
+use std::collections::VecDeque;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -37,7 +38,19 @@ pub struct Universe {
     width: u32,
     height: u32,
     cells: Vec<Cell>,
+    state_deque: VecDeque<Vec<Cell>>,
+    changes: Vec<CellDelta>,
 }
+
+#[wasm_bindgen]
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CellDelta {
+    Birth = 1,
+    None = 2,
+    Death = 0,
+}
+
 
 impl Universe {
     fn get_index(&self, row: u32, column: u32) -> usize {
@@ -82,12 +95,53 @@ impl Universe {
         }
     }
 
+    fn dead_cells(width: u32, height: u32) -> Vec<Cell> {
+        (0..width * height)
+            .map(|_i| Cell::Dead)
+            .collect()
+    }
+
+    fn calculate_changes(current: &Vec<Cell>, prev: &Vec<Cell>) -> Vec<CellDelta> {
+        let deltas = (0..current.len())
+            .map(|i| {
+                let item = match (current[i], prev[i]) {
+                    (Cell::Dead, Cell::Alive) => CellDelta::Death,
+                    (Cell::Alive, Cell::Dead) => CellDelta::Birth,
+                    (_x, _y) => CellDelta::None
+                };
+                item
+            })
+            .collect()
+            ;
+
+        deltas
+    }
+
+    fn safe_state_from_deque(&self, deque: VecDeque<Vec<Cell>>, index: usize) -> Vec<Cell> {
+        match deque.get(index) {
+            Some(cells) => cells.to_vec(),
+            None => Universe::dead_cells(self.width, self.height)
+        }
+    }
+
+    fn get_state_deque(&self) -> VecDeque<Vec<Cell>> {
+        self.state_deque.clone()
+    }
+
+    fn get_changes(&self) -> Vec<CellDelta> {
+        let prev = self.safe_state_from_deque(self.get_state_deque(), 1);
+        let current = self.safe_state_from_deque(self.get_state_deque(), 0);
+        Universe::calculate_changes(&current, &prev)
+    }
 }
 
 #[wasm_bindgen]
 impl Universe {
     pub fn tick(&mut self) {
-        let mut next = self.cells.clone();
+        let mut next = match self.state_deque.pop_back() {
+            Some(cells) => cells,
+            None => Universe::dead_cells(self.width, self.height)
+        };
 
         for row in 0..self.height {
             for col in 0..self.width {
@@ -116,7 +170,10 @@ impl Universe {
             }
         }
 
+        self.state_deque.push_front(next.to_vec());
         self.cells = next;
+
+        self.changes = self.get_changes();
     }
 
     pub fn count_neighbours(&self, row: u32, column: u32) -> u8 {
@@ -125,7 +182,7 @@ impl Universe {
 
     pub fn new_sized(width: u32, height: u32) -> Universe {
         let mut rng = thread_rng();
-        let cells = (0..width * height)
+        let cells: Vec<Cell> = (0..width * height)
             .map(|_i| {
                 let roll: f64 = rng.gen_range(0.0, 100.0);
                 if roll < 60.0 {
@@ -136,10 +193,21 @@ impl Universe {
             })
             .collect();
 
+        let dead_cells = Universe::dead_cells(width, height);
+        let current = cells.to_vec();
+
+        let changes = Universe::calculate_changes(&current, &dead_cells);
+        let mut state_deque = VecDeque::from([]);
+        state_deque.push_front(dead_cells);
+        state_deque.push_front(current);
+
+
         Universe {
             width,
             height,
             cells,
+            state_deque,
+            changes,
         }
     }
 
@@ -163,6 +231,10 @@ impl Universe {
 
     pub fn cells(&self) -> *const Cell {
         self.cells.as_ptr()
+    }
+
+    pub fn changes(&self) -> *const CellDelta {
+        self.changes.as_ptr()
     }
 
     /// Set the width of the universe.
